@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/noir-lang/noir-edwards/compare/v0.2.4...v0.2.5) (2025-07-24)
+
+
+### Bug Fixes
+
+* Let the bjj module be public ([#45](https://github.com/noir-lang/noir-edwards/issues/45)) ([f307808](https://github.com/noir-lang/noir-edwards/commit/f30780829b5e8f09c18871111b74f630374295d2))
+
 ## [0.2.4](https://github.com/noir-lang/noir-edwards/compare/v0.2.3...v0.2.4) (2025-07-17)
 
 
