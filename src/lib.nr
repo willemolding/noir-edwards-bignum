@@ -3,7 +3,7 @@ mod test;
 pub mod ed25519;
 
 pub use crate::scalar_field::ScalarField;
-use bignum::BigNum;
+use bignum::{BigNum, bignum::evaluate_quadratic_expression};
 use std::ops::{Add, Neg, Sub};
 
 /// A point on a Twisted Edwards curve whose coordinates live in an arbitrary
@@ -300,26 +300,128 @@ where
         let x2 = other.x;
         let y2 = other.y;
 
-        let x1x2 = x1 * x2;
-        let y1y2 = y1 * y2;
-        let x1y2 = x1 * y2;
-        let y1x2 = y1 * x2;
+        // Compute every witness unconstrained (no constraints emitted here), then
+        // pin them down below with 6 quadratic-expression reductions instead of the
+        // ~9 a naive sequence of `*` / `/` would cost. The witness computation lives
+        // in its own `unconstrained fn` so that this is a single Brillig call whose
+        // six outputs are each constrained directly below (satisfying the soundness
+        // lint), rather than a chain of intermediate unconstrained values.
+        //
+        // Safety: all six returned witnesses are constrained by the
+        // `evaluate_quadratic_expression` calls that follow.
+        let (x1x2, y1y2, e, t, x3, y3) =
+            unsafe { Self::__add_witnesses(x1, y1, x2, y2, a, d) };
 
-        // d * x1 * x2 * y1 * y2
-        let dxy = d * x1x2 * y1y2;
+        // 1. x1x2 == x1 * x2
+        evaluate_quadratic_expression([[x1]], [[false]], [[x2]], [[false]], [x1x2], [true]);
+        // 2. y1y2 == y1 * y2
+        evaluate_quadratic_expression([[y1]], [[false]], [[y2]], [[false]], [y1y2], [true]);
+        // 3. e == x1x2 * y1y2
+        evaluate_quadratic_expression([[x1x2]], [[false]], [[y1y2]], [[false]], [e], [true]);
+        // 4. t == d * e
+        evaluate_quadratic_expression([[d]], [[false]], [[e]], [[false]], [t], [true]);
+        // 5. x3*(1 + t) - x1*y2 - y1*x2 == 0   (x3*t and x3*1 split into product + linear)
+        evaluate_quadratic_expression(
+            [[x3], [x1], [y1]],
+            [[false], [true], [true]],
+            [[t], [y2], [x2]],
+            [[false], [false], [false]],
+            [x3],
+            [false],
+        );
+        // 6. y3*(1 - t) - y1*y2 + a*x1*x2 == 0   (= y3 - y3*t - y1y2 + a*x1x2)
+        evaluate_quadratic_expression(
+            [[y3], [a]],
+            [[true], [false]],
+            [[t], [x1x2]],
+            [[false], [false]],
+            [y3, y1y2],
+            [false, true],
+        );
 
-        let one = B::one();
-        let x3 = (x1y2 + y1x2) / (one + dxy);
-        let y3 = (y1y2 - a * x1x2) / (one - dxy);
         Self { x: x3, y: y3 }
+    }
+
+    /// Unconstrained witness computation for `add_internal`.
+    ///
+    /// Returns `(x1x2, y1y2, e, t, x3, y3)` where `e = x1*x2*y1*y2`, `t = d*e` and
+    /// `(x3, y3)` is the twisted Edwards sum.
+    unconstrained fn __add_witnesses(x1: B, y1: B, x2: B, y2: B, a: B, d: B) -> (B, B, B, B, B, B) {
+        let one = B::one();
+        let x1x2 = x1.__mul(x2);
+        let y1y2 = y1.__mul(y2);
+        let e = x1x2.__mul(y1y2); // x1*x2*y1*y2
+        let t = d.__mul(e); // d*x1*x2*y1*y2
+        let num_x = x1.__mul(y2).__add(y1.__mul(x2)); // x1*y2 + y1*x2
+        let num_y = y1y2.__sub(a.__mul(x1x2)); // y1*y2 - a*x1*x2
+        let x3 = num_x.__div(one.__add(t)); // / (1 + t)
+        let y3 = num_y.__div(one.__sub(t)); // / (1 - t)
+        (x1x2, y1y2, e, t, x3, y3)
+    }
+
+    /// Unconstrained witness computation for `dbl_internal`.
+    ///
+    /// Returns `(u, v, au, x3, y3)` where `u = x^2`, `v = y^2`, `au = a*x^2` and
+    /// `(x3, y3)` is the doubled point. All outputs are constrained by the caller.
+    unconstrained fn __dbl_witnesses(x: B, y: B, a: B) -> (B, B, B, B, B) {
+        let u = x.__mul(x); // x^2
+        let v = y.__mul(y); // y^2
+        let au = a.__mul(u); // a*x^2
+        let xy = x.__mul(y);
+        let num_x = xy.__add(xy); // 2*x*y
+        let num_y = v.__sub(au); // y^2 - a*x^2
+        let one = B::one();
+        let two = one.__add(one);
+        let x3 = num_x.__div(au.__add(v)); // / (a*x^2 + y^2)      == 1 + t
+        let y3 = num_y.__div(two.__sub(au).__sub(v)); // / (2 - a*x^2 - y^2)  == 1 - t
+        (u, v, au, x3, y3)
     }
 
     /// add a point to itself
     ///
-    /// The unified addition law is complete for the supported curves, so doubling is
-    /// simply `add_internal(self, self)`.
-    fn dbl_internal(self, a: B, d: B) -> Self {
-        self.add_internal(self, a, d)
+    /// Uses the dedicated twisted Edwards doubling formula:
+    ///
+    ///     x3 = (2*x*y)         / (a*x^2 + y^2)
+    ///     y3 = (y^2 - a*x^2)   / (2 - a*x^2 - y^2)
+    ///
+    /// The curve equation `a*x^2 + y^2 == 1 + d*x^2*y^2` lets us compute the denominators
+    /// without the `d*x^2*y^2` product, so this is one reduction cheaper than reusing
+    /// `add_internal`. `d` is unused but kept in the signature for a uniform call site.
+    fn dbl_internal(self, a: B, _d: B) -> Self {
+        let x = self.x;
+        let y = self.y;
+
+        // Safety: all five witnesses are constrained by the
+        // `evaluate_quadratic_expression` calls below. The doubling formula is complete
+        // for the supported curves, so the denominators are never zero.
+        let (u, v, au, x3, y3) = unsafe { Self::__dbl_witnesses(x, y, a) };
+
+        // 1. u == x * x
+        evaluate_quadratic_expression([[x]], [[false]], [[x]], [[false]], [u], [true]);
+        // 2. v == y * y
+        evaluate_quadratic_expression([[y]], [[false]], [[y]], [[false]], [v], [true]);
+        // 3. au == a * u
+        evaluate_quadratic_expression([[a]], [[false]], [[u]], [[false]], [au], [true]);
+        // 4. x3*(au + v) - 2*x*y == 0
+        evaluate_quadratic_expression(
+            [[x3], [x3], [x], [x]],
+            [[false], [false], [false], [false]],
+            [[au], [v], [y], [y]],
+            [[false], [false], [true], [true]],
+            [],
+            [],
+        );
+        // 5. y3*(2 - au - v) - (v - au) == 0   (= 2*y3 - y3*au - y3*v + au - v)
+        evaluate_quadratic_expression(
+            [[y3], [y3]],
+            [[false], [false]],
+            [[au], [v]],
+            [[true], [true]],
+            [y3, y3, au, v],
+            [false, false, false, true],
+        );
+
+        Self { x: x3, y: y3 }
     }
 
     /// Compute a 4-bit lookup table of point multiples for the Straus windowed scalar multiplication algorithm.
