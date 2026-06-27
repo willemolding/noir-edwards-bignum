@@ -1,13 +1,19 @@
 mod scalar_field;
 mod test;
-pub mod bjj;
+pub mod ed25519;
 
 pub use crate::scalar_field::ScalarField;
+use bignum::BigNum;
 use std::ops::{Add, Neg, Sub};
 
-pub struct Curve<Params> {
-    pub x: Field,
-    pub y: Field,
+/// A point on a Twisted Edwards curve whose coordinates live in an arbitrary
+/// prime field represented by the `BigNum` type `B`.
+///
+/// `B` is the base field of the curve (the field the x/y coordinates live in).
+/// `Params` supplies the curve constants `a`, `d` and the generator (all of type `B`).
+pub struct Curve<B, Params> {
+    pub x: B,
+    pub y: B,
 }
 
 // ####################################################################################################################
@@ -16,16 +22,19 @@ pub struct Curve<Params> {
 // ####################################################################################################################
 // ####################################################################################################################
 
-/// Parametrises a Twisted Edwards curve
-trait TECurveParameterTrait {
-    fn a() -> Field; // twisted edward curve parameter a
-    fn d() -> Field; // twisted edward curve parameter d
-    fn gen() -> (Field, Field); // generator point x/y coordinates
+/// Parametrises a Twisted Edwards curve defined over the base field `B`.
+pub trait TECurveParameterTrait<B>
+where
+    B: BigNum,
+{
+    fn a() -> B; // twisted edwards curve parameter a
+    fn d() -> B; // twisted edwards curve parameter d
+    fn gen() -> (B, B); // generator point x/y coordinates
 }
 
 /// Defines methods that a valid Curve implementation must satisfy
-pub trait CurveTrait<Params>: Add + Sub + Eq + Neg + Default {
-    fn new(x: Field, y: Field) -> Self;
+pub trait CurveTrait<B, Params>: Add + Sub + Eq + Neg + Default {
+    fn new(x: B, y: B) -> Self;
     fn zero() -> Self;
     fn one() -> Self;
     fn dbl(self) -> Self;
@@ -52,99 +61,91 @@ pub trait CurveTrait<Params>: Add + Sub + Eq + Neg + Default {
 // ### C O N S T R A I N E D    F U N C T I O N S
 // ####################################################################################################################
 // ####################################################################################################################
-impl<Params> std::default::Default for Curve<Params>
+impl<B, Params> std::default::Default for Curve<B, Params>
 where
-    Params: TECurveParameterTrait,
+    B: BigNum,
+    Params: TECurveParameterTrait<B>,
 {
     /// Returns point at infinity
-    ///
-    /// Cost: 0 gates
     fn default() -> Self {
         Curve::zero()
     }
 }
 
-impl<Params> std::ops::Add for Curve<Params>
+impl<B, Params> std::ops::Add for Curve<B, Params>
 where
-    Params: TECurveParameterTrait,
+    B: BigNum,
+    Params: TECurveParameterTrait<B>,
 {
     /// Compute `self + other`
-    ///
-    /// Cost: 7 gates
     fn add(self, other: Self) -> Self {
         Curve::add_internal(self, other, Params::a(), Params::d())
     }
 }
 
-impl<Params> std::ops::Neg for Curve<Params> {
+impl<B, Params> std::ops::Neg for Curve<B, Params>
+where
+    B: BigNum,
+{
     /// Negate a point
-    ///
-    /// Cost: usually 0, will cost 1 gate if the `x` coordinate needs to be converted into a witness
     fn neg(self) -> Self {
-        Curve { x: -self.x, y: self.y }
+        Curve { x: self.x.neg(), y: self.y }
     }
 }
 
-impl<Params> std::ops::Sub for Curve<Params>
+impl<B, Params> std::ops::Sub for Curve<B, Params>
 where
-    Params: TECurveParameterTrait,
+    B: BigNum,
+    Params: TECurveParameterTrait<B>,
 {
     /// Compute `self - other`
-    ///
-    /// Cost: 7 gates
     fn sub(self, other: Self) -> Self {
         Curve::add_internal(self, other.neg(), Params::a(), Params::d())
     }
 }
 
-impl<Params> std::cmp::Eq for Curve<Params> {
+impl<B, Params> std::cmp::Eq for Curve<B, Params>
+where
+    B: BigNum,
+{
     /// Compute `self == other`
-    ///
-    /// Cost: 6 gates
     fn eq(self, other: Self) -> bool {
         (self.x == other.x) & (self.y == other.y)
     }
 }
 
-impl<Params> std::convert::From<(Field, Field)> for Curve<Params> {
-    /// Construct from tuple of field elements
+impl<B, Params> std::convert::From<(B, B)> for Curve<B, Params> {
+    /// Construct from tuple of base field elements
     ///
     /// Use this method instead of `new` if you know x/y is on the curve
-    ///
-    /// Cost: 0 gates
-    fn from((x, y): (Field, Field)) -> Self {
+    fn from((x, y): (B, B)) -> Self {
         Curve { x, y }
     }
 }
 
-impl<Params> CurveTrait<Params> for Curve<Params>
+impl<B, Params> CurveTrait<B, Params> for Curve<B, Params>
 where
-    Params: TECurveParameterTrait,
+    B: BigNum,
+    Params: TECurveParameterTrait<B>,
 {
 
     /// Construct a new point
     ///
     /// If you know the x/y coords form a valid point DO NOT USE THIS METHOD
-    /// This method calls `assert_is_on_curve` which costs 3 gates.
+    /// This method calls `assert_is_on_curve`.
     /// Instead, directly construct via Curve{x, y} or use from((x, y))
-    ///
-    /// Cost: 3 gates
-    fn new(x: Field, y: Field) -> Self {
+    fn new(x: B, y: B) -> Self {
         let result = Curve { x, y };
         result.assert_is_on_curve();
         result
     }
 
-    /// Return the Identity element (point at infinity)
-    ///
-    /// Cost: 0 gates
+    /// Return the Identity element (point at infinity), which is `(0, 1)`
     fn zero() -> Self {
-        Curve { x: 0, y: 1 }
+        Curve { x: B::zero(), y: B::one() }
     }
 
     /// Return the Generator of the group
-    ///
-    /// Cost: 0 gates (assuming Params trait returns values known at compile time!)
     fn one() -> Self {
         let (x, y) = Params::gen();
         Curve { x, y }
@@ -154,22 +155,18 @@ where
     ///
     /// cheaper than `is_on_curve` (assert is cheaper than returning a bool)
     ///
-    /// Cost: 3 gates
+    /// Checks `a*x^2 + y^2 == 1 + d*x^2*y^2`
     fn assert_is_on_curve(self) {
-        let t0 = self.x * self.x;
-        let t1 = self.y * self.y;
-        std::as_witness(t0);
-        std::as_witness(t1);
-        let t2 = Params::a() * t0 + t1;
-        let t3 = 1 + Params::d() * t0 * t1;
+        let a = Params::a();
+        let d = Params::d();
+        let t0 = self.x.sqr();
+        let t1 = self.y.sqr();
+        let t2 = a * t0 + t1;
+        let t3 = B::one() + d * t0 * t1;
         assert(t2 == t3);
     }
 
     /// Constrain two points to equal each other
-    ///
-    /// Cheaper than `assert(self == other)` because no need to return a bool
-    ///
-    /// Cost: 0-2 gates (can do these asserts with just copy constraints)
     fn assert_equal(self, other: Self) {
         assert(self.x == other.x);
         assert(self.y == other.y);
@@ -178,21 +175,17 @@ where
     /// Return a bool that describes whether the point is on the curve
     ///
     /// If you don't need to handle the failure case, it is cheaper to call `assert_is_on_curve`
-    ///
-    /// Cost: 5 gates
     fn is_on_curve(self) -> bool {
-        let t0 = self.x * self.x;
-        let t1 = self.y * self.y;
-        std::as_witness(t0);
-        std::as_witness(t1);
-        let t2 = Params::a() * t0 + t1;
-        let t3 = 1 + Params::d() * t0 * t1;
+        let a = Params::a();
+        let d = Params::d();
+        let t0 = self.x.sqr();
+        let t1 = self.y.sqr();
+        let t2 = a * t0 + t1;
+        let t3 = B::one() + d * t0 * t1;
         (t2 == t3)
     }
 
     /// Compute `self + self`
-    ///
-    /// Cost: 5 gates
     fn dbl(self) -> Self {
         Curve::dbl_internal(self, Params::a(), Params::d())
     }
@@ -202,21 +195,13 @@ where
     /// Uses the Straus method via lookup tables.
     /// Assumes backend has an efficient implementation of a memory table abstraction
     /// i.e. `let x = table[y]` is efficient even if `y` is not known at compile time
-    ///
-    /// Key cost components are as follows:
-    ///      1: computing the Straus point lookup table (169 gates)
-    ///      2: 252 point doublings (1260 gates)
-    ///      3: 63 point additions (441 gates)
-    ///      4: 126 table reads with runtime index (252 gates)
-    ///
-    /// Cost: 2122 gates + cost of creating ScalarField (110 gates)
     fn mul<let NScalarSlices: u32>(self: Self, scalar: ScalarField<NScalarSlices>) -> Self {
         // define a, d params locally to make code more readable (shouldn't affect performance)
         let a = Params::a();
         let d = Params::d();
 
         // Construct tables of precomputed point coordinates.
-        let (table_x, table_y): ([Field; 16], [Field; 16]) = self.compute_straus_point_table(a, d);
+        let (table_x, table_y): ([B; 16], [B; 16]) = self.compute_straus_point_table(a, d);
 
         // Initialize the accumulator with the point that maps to the first (most significant) scalar slice
         let idx = scalar.base4_slices[0] as u32;
@@ -238,7 +223,6 @@ where
             accumulator = accumulator.add_internal(Curve { x, y }, a, d);
         }
 
-        // todo fix
         if (scalar.skew) {
             accumulator = accumulator - self;
         }
@@ -249,19 +233,6 @@ where
     ///
     /// Is cheaper than `mul` when processing >1 point due to reduced number of point doublings
     /// uses the Straus MSM method via lookup tables.
-    /// Assumes backend has an efficient implementation of a memory table abstraction
-    /// i.e. `let x = table[y]` is efficient even if `y` is not known at compile time
-    ///
-    /// Key cost components are as follows
-    /// PER POINT costs:
-    ///      1: computing the Straus point lookup table (169N gates)
-    ///      2: 63 point additions (441N gates)
-    ///      3: 126 table reads with runtime index (252N gates)
-    ///
-    /// Additional costs:
-    ///      1. 252 point doublings 1260 gates
-    ///
-    /// Cost: 1260 + 862N + cost of creating ScalarField (110N gates)
     fn msm<let N: u32, let NScalarSlices: u32>(
         points: [Self; N],
         scalars: [ScalarField<NScalarSlices>; N],
@@ -270,7 +241,8 @@ where
         let d = Params::d();
 
         // Generalized version of `mul` for multiple points.
-        let mut point_tables: [([Field; 16], [Field; 16]); N] = [([0; 16], [0; 16]); N];
+        let mut point_tables: [([B; 16], [B; 16]); N] =
+            [([B::zero(); 16], [B::zero(); 16]); N];
         for j in 0..N {
             point_tables[j] = points[j].compute_straus_point_table(a, d);
         }
@@ -309,92 +281,57 @@ where
 // ### H E L P E R    F U N C T I O N S
 // ####################################################################################################################
 // ####################################################################################################################
-impl<Params> Curve<Params> {
+impl<B, Params> Curve<B, Params>
+where
+    B: BigNum,
+{
 
-    /// add two points together
+    /// add two points together using the unified (complete) twisted Edwards addition law:
     ///
-    /// This method exists because of a Noir bug where `Params` cannot be accessed by an internal function
-    /// called from internal function. e.g. compiler error if `mul` impl tries to call `add` :(
-    fn add_internal(self, other: Self, a: Field, d: Field) -> Self {
+    ///     x3 = (x1*y2 + y1*x2) / (1 + d*x1*x2*y1*y2)
+    ///     y3 = (y1*y2 - a*x1*x2) / (1 - d*x1*x2*y1*y2)
+    ///
+    /// This method takes `a` and `d` as arguments (rather than reading them from `Params`)
+    /// because of a Noir limitation where `Params` cannot be accessed by an internal function
+    /// called from another internal function.
+    fn add_internal(self, other: Self, a: B, d: B) -> Self {
         let x1 = self.x;
-        let x2 = other.x;
         let y1 = self.y;
+        let x2 = other.x;
         let y2 = other.y;
-        let (x, y, lambda) = unsafe { __add_unconstrained(x1, x2, y1, y2, a, d) };
+
         let x1x2 = x1 * x2;
-        let x1y2 = x1 * y2;
-        std::as_witness(x1x2);
-        std::as_witness(x1y2);
-        let x_lhs = x * lambda * d + x - x1y2; // equals y1x2
-        let y_lhs = y * lambda * -d + y + x1x2 * a; // equals y1y2
-        let y1x2 = y1 * x2;
         let y1y2 = y1 * y2;
-        std::as_witness(y1x2);
-        std::as_witness(y1y2);
-        let y1y2x1x2 = y1y2 * x1x2;
-        assert(x_lhs == y1x2);
-        assert(y_lhs == y1y2);
-        assert(y1y2x1x2 == lambda);
-        Self { x, y }
+        let x1y2 = x1 * y2;
+        let y1x2 = y1 * x2;
+
+        // d * x1 * x2 * y1 * y2
+        let dxy = d * x1x2 * y1y2;
+
+        let one = B::one();
+        let x3 = (x1y2 + y1x2) / (one + dxy);
+        let y3 = (y1y2 - a * x1x2) / (one - dxy);
+        Self { x: x3, y: y3 }
     }
 
     /// add a point to itself
     ///
-    /// This method exists because of a Noir bug where `Params` cannot be accessed by an internal function
-    /// called from internal function. e.g. compiler error if `mul` impl tries to call `dbl` :(
-    fn dbl_internal(self, a: Field, d: Field) -> Self {
-        let x1 = self.x;
-        let y1 = self.y;
-        let (x3, y3, _) = unsafe { __add_unconstrained(x1, x1, y1, y1, a, d) };
-        let x1x1a = x1 * x1 * a;
-        std::as_witness(x1x1a);
-        // t1 = a*x_1^2 + y_1^2
-        let t1 = y1 * y1 + x1x1a;
-        std::as_witness(t1);
-        // t3 = y_3 * (2 - a*x_1^2 + y_1^2) + 2*a*x_1^2
-        let t3 = y3 + y3 - t1 * y3 + x1x1a * 2;
-        // t3 == t1 implies y_3 * (2 - a*x_1^2 - y_1^2) + 2*a*x_1^2 == a*x_1^2 + y_1^2
-        // i.e. y_3 = y_1^2 - a*x_1^2 / (2 - a*x_1^2 - y_1^2)
-        assert(t3 == t1);
-        let t4 = x1 * y1;
-        std::as_witness(t4);
-        // x3 * t1 - t4 == t4 implies x_3 * (y_1^2 + a * x_1^2) = 2 * x_1 * y_1
-        // i.e. x_3 = 2 * x_1 * y_1 / (y_1^2 + a * x_1^2)
-        let t2 = x3 * t1 - t4;
-        assert(t2 == t4);
-        Self { x: x3, y: y3 }
+    /// The unified addition law is complete for the supported curves, so doubling is
+    /// simply `add_internal(self, self)`.
+    fn dbl_internal(self, a: B, d: B) -> Self {
+        self.add_internal(self, a, d)
     }
 
     /// Compute a 4-bit lookup table of point multiples for the Straus windowed scalar multiplication algorithm.
     ///
-    /// Table contains [0, P, 2P, ..., 15P], which is used in the scalar mul algorithm to minimize the total number of required point additions
+    /// Table contains the signed odd multiples used by the wNAF-style scalar mul algorithm to
+    /// minimize the total number of required point additions.
     ///
-    /// It is cheaper to use ([Field; 16], [Field; 16]) than it is ([Curve; 16]).
-    /// This is because the compiler will represent [Curve; 16] in 1 ROM array (vs 2 for [Field; 16], [Field; 16]).
-    /// This means that any index into the ROM array for [Curve; 16] requires an additional arithmetic gate to process.
-    ///
-    ///      For example consider `let P: Curve = table[idx]`
-    ///      `table` will be a ROM array with 32 elements in it.
-    ///      The x-coordinates will be located at `2 * idx`
-    ///      The y-coordinates will be located at `2 * idx + 1`
-    ///      If `idx` is not known at compile time (for Straus it isnt), 2 arithmetic gates are required to evaluate `2 * idx`, `2 * idx + 1`
-    ///      before they can be used as arguments in a memory lookup protocol
-    ///
-    ///      Now consider `let P_x = table_x[idx]; let P_y = table_y[idx]`
-    ///      In this example, `idx` can be directly used as the argument into a memory lookup protocol for both tables.
-    ///
-    ///      For the Barretenberg backend, the cost of a Read-Only memory lookup is 2 gates,
-    ///      so splitting the x/y coordinates into separate tables means that the cost to lookup a point is 4 gates
-    ///      2 extra arithmetic gates would increase the cost by 50%, which we avoid by returning `([Field; 16], [Field; 16])` instead of `([Curve; 16])`
-    ///
-    /// Key cost components are as follows:
-    ///      1: Defining two size-16 lookup tables (2 gates per element, 32 elements = 64 gates)
-    ///      2: 15 point additions (7 * 5 = 105)
-    ///
-    /// Total Cost: 169 gates
-    fn compute_straus_point_table(self, a: Field, d: Field) -> ([Field; 16], [Field; 16]) {
-        let mut table_x: [Field; 16] = [0; 16];
-        let mut table_y: [Field; 16] = [0; 16];
+    /// We use `([B; 16], [B; 16])` (separate x and y tables) rather than `[Curve; 16]` so that a
+    /// runtime index can be used directly as the argument to a memory lookup for each coordinate.
+    fn compute_straus_point_table(self, a: B, d: B) -> ([B; 16], [B; 16]) {
+        let mut table_x: [B; 16] = [B::zero(); 16];
+        let mut table_y: [B; 16] = [B::zero(); 16];
         table_x[8] = self.x;
         table_y[8] = self.y;
         let D = self.dbl_internal(a, d);
@@ -405,24 +342,9 @@ impl<Params> Curve<Params> {
             table_y[8 + i] = V.y;
         }
         for i in 0..8 {
-            table_x[i] = -table_x[15 - i];
+            table_x[i] = table_x[15 - i].neg();
             table_y[i] = table_y[15 - i];
         }
         (table_x, table_y)
     }
-}
-
-/// add points together, return output + lambda ter
-unconstrained fn __add_unconstrained(
-    x1: Field,
-    x2: Field,
-    y1: Field,
-    y2: Field,
-    a: Field,
-    d: Field,
-) -> (Field, Field, Field) {
-    let lambda = y1 * y2 * x1 * x2;
-    let y = (x1 * x2 * a - y1 * y2) / (lambda * d - 1);
-    let x = (x1 * y2 + y1 * x2) / (lambda * d + 1);
-    (x, y, lambda)
 }
