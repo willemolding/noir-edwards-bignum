@@ -1,7 +1,8 @@
 [package]
-name = "edwards"
+name = "edwards_bignum"
 type = "lib"
 authors = [""]
 compiler_version = ">=1.0.0"
 
 [dependencies]
+bignum = { git = "https://github.com/noir-lang/noir-bignum", tag = "v0.10.0" }

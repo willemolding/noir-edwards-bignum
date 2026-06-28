@@ -1,9 +1,8 @@
-# noir-edwards
+# noir-edwards-bignum
 
-Optimized implementation of Twisted Edwards curves.
+> [!WARNING]
+> This implementation is unaudited and not intended for production use at this time
 
-Uses lookup tables and maximally efficient representations of group operations (for width-4 noir) to efficiently implement scalar multiplication and multiscalar multiplication.
-
-Cost of 1 scalar mul = 2232 gates. Marginal cost of additional muls in an msm = 972 gates.
+Optimized implementation of Twisted Edwards curves over BigNums rather than Fields.
 
 For example usage see `test.nr`

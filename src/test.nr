@@ -1,164 +1,117 @@
-use crate::bjj::{BabyJubJub, BabyJubJubParams};
 use crate::Curve;
 use crate::CurveTrait;
-use crate::scalar_field::{PHI, PLO, ScalarField, TWO_POW_128};
+use crate::ed25519::Ed25519;
+use crate::scalar_field::ScalarField;
+use bignum::BigNum;
+use std::ops::Neg;
 
-pub global TWO_POW_252: Field = 0x1000000000000000000000000000000000000000000000000000000000000000;
-global BASE8: [Field; 2] = [
-    5299619240641551281634865583518297030282874472190772894086521144482721001553,
-    16950150798460657717958625567821834550301663161624707787222815936182638968203,
-];
+/// Construct an ed25519 point directly from the 120-bit limb representation of its coordinates.
+///
+/// Unlike BabyJubJub, the ed25519 base field (2^255 - 19) does not fit in a native `Field`,
+/// so coordinates have to be supplied as `BigNum` limbs rather than `Field` literals.
+fn point(x: [u128; 3], y: [u128; 3]) -> Ed25519 {
+    Curve { x: BigNum::from_limbs(x), y: BigNum::from_limbs(y) }
+}
 
-#[test]
-fn test_sub() {
-    let point: Curve<BabyJubJubParams> = Curve { x: BASE8[0], y: BASE8[1] };
-    let expected = point + (point + (point));
-    let result = point.dbl().dbl() - point;
+fn assert_eq_point(result: Ed25519, expected: Ed25519) {
     assert(result.x == expected.x);
     assert(result.y == expected.y);
 }
 
 #[test]
-fn test_scalar_mul_1() {
-    let scalar = 9;
-    let bjj_point = BabyJubJub::new(BASE8[0], BASE8[1]);
-    let scalar_f: ScalarField<63> = ScalarField::from(scalar);
-    let expected = bjj_point.mul(scalar_f);
-    let mut result = bjj_point.dbl().dbl().dbl();
-    result = result + bjj_point;
-    assert(result.x == expected.x);
-    assert(result.y == expected.y);
+fn test_generator_on_curve() {
+    Ed25519::one().assert_is_on_curve();
+    assert(Ed25519::one().is_on_curve());
 }
 
 #[test]
-fn test_scalar_mul_2() {
-    let scalar = 125008707422548553008458566692055115405265404091165231253731979;
-    let point: BabyJubJub = BabyJubJub {
-        x: 0x0bb77a6ad63e739b4eacb2e09d6277c12ab8d8010534e0b62893f3f6bb957051,
-        y: 0x25797203f7a0b24925572e1cd16bf9edfce0051fb9e133774b3c257a872d7d8b,
-    };
-    let scalar_f: ScalarField<63> = ScalarField::from(scalar);
-    let result = point.mul(scalar_f);
-    let expected: BabyJubJub = BabyJubJub {
-        x: 617161874567552582384121722828904445762099298246151845490568021290206689792,
-        y: 13034886054222108846214594281471929075849418819835081605284620402790201340104,
-    };
-    assert(result.x == expected.x);
-    assert(result.y == expected.y);
+fn test_add_sub() {
+    let b = Ed25519::one();
+    // 3B computed two ways
+    let expected = b + (b + b);
+    // 4B - B
+    let result = b.dbl().dbl() - b;
+    assert_eq_point(result, expected);
 }
 
 #[test]
-fn test_scalar_mul_3() {
-    let scalar = 54151461856964260907680256125457277518023881635046757770759266;
-    let point: BabyJubJub = BabyJubJub { x: BASE8[0], y: BASE8[1] };
-    let scalar_f: ScalarField<63> = ScalarField::from(scalar);
-    let result = point.mul(scalar_f);
-    let expected: BabyJubJub = BabyJubJub {
-        x: 19208535741451908456059246935738795913108647784428496829884866473148752123890,
-        y: 11995935797001296221514672688383396330912779758746145432661060411923774860388,
-    };
-    assert(result.x == expected.x);
-    assert(result.y == expected.y);
+fn test_scalar_mul_small() {
+    // 9 * B, checked against a manual 8B + B and an independently computed vector
+    let scalar_f: ScalarField<64> = ScalarField::from(9);
+    let result = Ed25519::one().mul(scalar_f);
+
+    let b = Ed25519::one();
+    let mut manual = b.dbl().dbl().dbl();
+    manual = manual + b;
+    assert_eq_point(result, manual);
+
+    let expected = point(
+        [0xd80e5c2e4e0294d3e023065185715c, 0xc970c80071651bf336e06f9422b886, 0x357c],
+        [0x789013236e4430c74e44845522f1c0, 0x23c2c2dd0df4b2befce956f2d2fd1f, 0x7f3d],
+    );
+    assert_eq_point(result, expected);
+}
+
+#[test]
+fn test_scalar_mul_vector() {
+    let scalar_f: ScalarField<64> = ScalarField::from(1234567890123456789);
+    let result = Ed25519::one().mul(scalar_f);
+    let expected = point(
+        [0x2429f2f7a0427ce897e4729187bd2f, 0xd16f1a3e8e66055591a596e09d9acc, 0x5e3],
+        [0x570534fb765a50f0f60b0c636a4047, 0xcbeda1207673018275d54d0b743d3c, 0x2eae],
+    );
+    assert_eq_point(result, expected);
+}
+
+#[test]
+fn test_scalar_mul_large_vector() {
+    // A scalar just below 2^252 (still < native field modulus).
+    let scalar = 6453482971500802406899721436289478618597120925962473168869639197649048738061;
+    let scalar_f: ScalarField<64> = ScalarField::from(scalar);
+    let result = Ed25519::one().mul(scalar_f);
+    let expected = point(
+        [0xfac89db53a54f786b16ee3aaef44ee, 0x5f918207f7c0b743ac985bab703ef4, 0x3d05],
+        [0xb2ccc3337196af2efd33cded083827, 0xf4dd8147ec646d713c4576687b184c, 0x775a],
+    );
+    assert_eq_point(result, expected);
 }
 
 #[test]
 fn test_msm() {
-    let bjj_point = BabyJubJub {
-        x: 0x0bb77a6ad63e739b4eacb2e09d6277c12ab8d8010534e0b62893f3f6bb957051,
-        y: 0x25797203f7a0b24925572e1cd16bf9edfce0051fb9e133774b3c257a872d7d8b,
-    };
+    let b = Ed25519::one();
+    let p2 = point(
+        [0xd8e4515d7a45f83c5a14e2843ce0e, 0x384c9f5a046c3d043b7d1833e7ac08, 0x36ab],
+        [0x390f51643851560e5f46ae6af8a3c9, 0xcdf3092329c21da25ee8c9a21f5697, 0x2260],
+    ); // 2B
+    let p3 = point(
+        [0xe809f3bbf1ce955855981af50e4107, 0x8685fcf4bd4ee9e3ee194b1d810783, 0x1456],
+        [0x882b46f7abf23d12c4c4b59f4062b8, 0x63e32b47d52f87ce6468dd36ad41f0, 0x31c5],
+    ); // 7B
 
+    let points = [b, p2, p3];
     let scalars = [
-        ScalarField::<63>::from(1),
-        ScalarField::<63>::from(
-            22096485197410035909796157153320654984986529955857497602977111,
-        ),
-        ScalarField::<63>::from(
-            65246305321293276263364651658295321649030097759571141639656096,
-        ),
-        ScalarField::<63>::from(
-            10783877200430517958910274429249773390381127732782098389956753,
-        ),
-        ScalarField::<63>::from(
-            85115736955169157032026426022325039306882570918771222968894742,
-        ),
-        ScalarField::<63>::from(
-            8007661759673469897619789883995943075483797120112799675116988,
-        ),
-        ScalarField::<63>::from(
-            120632748994973016066965702250208710570048996425404505467379186,
-        ),
-        ScalarField::<63>::from(
-            7880449440789589435266457223958696289620324225124952334738121,
-        ),
-        ScalarField::<63>::from(
-            86393120011600029661131030778522549251804186678072815524194808,
-        ),
-        ScalarField::<63>::from(
-            87733764451921476238239626348847201783164441449836684513847657,
-        ),
-    ];
-
-    let points = [
-        bjj_point,
-        BabyJubJub {
-            x: 6908307910410799727742014631870645132468849638438785192023894233964747648246,
-            y: 1117247569715206928008211232281782362917630199461454595461800473556215015531,
-        },
-        BabyJubJub {
-            x: 20961750243890720535629167040809652791859594413096044973136607904650832264730,
-            y: 3667872899218539236578732091671023586522699998168411741204352569314950923203,
-        },
-        BabyJubJub {
-            x: 9242845010005317730554303618656955152057106587627235401784820451786543272328,
-            y: 8361223956059552338001832638570050886817197127330309519914796154028334872651,
-        },
-        BabyJubJub {
-            x: 14695455247551978427572444624408674826222153759343114431423847408522503291511,
-            y: 17083718747713825481233561791146947590762250218126109450127826273602275602945,
-        },
-        BabyJubJub {
-            x: 12651252941938248665893806292608903013146642645301298232801488188791583313284,
-            y: 2696575039526434571211651150692815966656551007520222995710428115207480112887,
-        },
-        BabyJubJub {
-            x: 7851198486663817094882669094016375866490899059694847247154885216608493354280,
-            y: 13029415159272931747874822423922297641162291322751711599799454751602691242083,
-        },
-        BabyJubJub {
-            x: 17157209920272988621763172574968463086712340171272077002499355712694599831919,
-            y: 21429257232797467406552146211729253324737611878355163665519157983173871945271,
-        },
-        BabyJubJub {
-            x: 10126291830257109041882984305316110558514650221195031244344949855101922260578,
-            y: 7356838874813998377349355063760749355414350391995970274536579749579154432749,
-        },
-        BabyJubJub {
-            x: 16373445850576846598377550621753030487980229051510483964934158889959117451333,
-            y: 571457541426255272935595262428513985863469854864356275416794825997199661466,
-        },
+        ScalarField::<64>::from(1111111111111111111111111111111111111111),
+        ScalarField::<64>::from(2222222222222222222222222222222222222222),
+        ScalarField::<64>::from(3333333333333333333333333333333333333333),
     ];
     let result = Curve::msm(points, scalars);
 
-    let expected = BabyJubJub {
-        x: 0x2d4030b35ef0c22ec905ac20f5292c4484a236f70171b41dd4384081c6a53617,
-        y: 0x19a88b791ce81b6181d10e87c81cf962757129dd4da39b13529e32ece9015e05,
-    };
-
-    assert(result.x == expected.x);
-    assert(result.y == expected.y);
+    let expected = point(
+        [0xf2b36a7282d3e08863181f6d408af5, 0xb8cc72c03f895a25592f2a5751cff0, 0x90a],
+        [0x544f51dcd89cf2889f8979e752cf5, 0xd54d3ed804e374ed5d14809409d843, 0x30a6],
+    );
+    assert_eq_point(result, expected);
 }
 
 #[test]
-fn test_scalar_field_regression() {
-    let x: Field = 0x216b776d574b1fc3b5a87247c240b0aee5f876735930bc682e5f0bd21f52936e;
-    let scalar_field: ScalarField<64> = ScalarField::<64>::from(x);
-    assert(ScalarField::into(scalar_field) == x);
-}
-
-#[test]
-fn test_globals() {
-    PLO.assert_max_bit_size::<128>();
-    PHI.assert_max_bit_size::<128>();
-    assert(PLO + PHI * TWO_POW_128 == 0);
+fn test_full_range_scalar_needs_64_slices() {
+    // ed25519's group order ell is *just above* 2^252, so a reduced scalar can exceed the
+    // 2^252 range that `ScalarField<63>` covers. `ScalarField<64>` is required.
+    //
+    // (ell - 1) * B == -B, which we use as the expected value without an external vector.
+    let ell_minus_1 =
+        7237005577332262213973186563042994240857116359379907606001950938285454250988;
+    let scalar_f: ScalarField<64> = ScalarField::from(ell_minus_1);
+    let result = Ed25519::one().mul(scalar_f);
+    assert_eq_point(result, Ed25519::one().neg());
 }
