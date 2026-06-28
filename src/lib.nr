@@ -310,7 +310,7 @@ where
         // Safety: all six returned witnesses are constrained by the
         // `evaluate_quadratic_expression` calls that follow.
         let (x1x2, y1y2, e, t, x3, y3) =
-            unsafe { Self::__add_witnesses(x1, y1, x2, y2, a, d) };
+            unsafe { __add_witnesses(x1, y1, x2, y2, a, d) };
 
         // 1. x1x2 == x1 * x2
         evaluate_quadratic_expression([[x1]], [[false]], [[x2]], [[false]], [x1x2], [true]);
@@ -342,41 +342,6 @@ where
         Self { x: x3, y: y3 }
     }
 
-    /// Unconstrained witness computation for `add_internal`.
-    ///
-    /// Returns `(x1x2, y1y2, e, t, x3, y3)` where `e = x1*x2*y1*y2`, `t = d*e` and
-    /// `(x3, y3)` is the twisted Edwards sum.
-    unconstrained fn __add_witnesses(x1: B, y1: B, x2: B, y2: B, a: B, d: B) -> (B, B, B, B, B, B) {
-        let one = B::one();
-        let x1x2 = x1.__mul(x2);
-        let y1y2 = y1.__mul(y2);
-        let e = x1x2.__mul(y1y2); // x1*x2*y1*y2
-        let t = d.__mul(e); // d*x1*x2*y1*y2
-        let num_x = x1.__mul(y2).__add(y1.__mul(x2)); // x1*y2 + y1*x2
-        let num_y = y1y2.__sub(a.__mul(x1x2)); // y1*y2 - a*x1*x2
-        let x3 = num_x.__div(one.__add(t)); // / (1 + t)
-        let y3 = num_y.__div(one.__sub(t)); // / (1 - t)
-        (x1x2, y1y2, e, t, x3, y3)
-    }
-
-    /// Unconstrained witness computation for `dbl_internal`.
-    ///
-    /// Returns `(u, v, au, x3, y3)` where `u = x^2`, `v = y^2`, `au = a*x^2` and
-    /// `(x3, y3)` is the doubled point. All outputs are constrained by the caller.
-    unconstrained fn __dbl_witnesses(x: B, y: B, a: B) -> (B, B, B, B, B) {
-        let u = x.__mul(x); // x^2
-        let v = y.__mul(y); // y^2
-        let au = a.__mul(u); // a*x^2
-        let xy = x.__mul(y);
-        let num_x = xy.__add(xy); // 2*x*y
-        let num_y = v.__sub(au); // y^2 - a*x^2
-        let one = B::one();
-        let two = one.__add(one);
-        let x3 = num_x.__div(au.__add(v)); // / (a*x^2 + y^2)      == 1 + t
-        let y3 = num_y.__div(two.__sub(au).__sub(v)); // / (2 - a*x^2 - y^2)  == 1 - t
-        (u, v, au, x3, y3)
-    }
-
     /// add a point to itself
     ///
     /// Uses the dedicated twisted Edwards doubling formula:
@@ -394,7 +359,7 @@ where
         // Safety: all five witnesses are constrained by the
         // `evaluate_quadratic_expression` calls below. The doubling formula is complete
         // for the supported curves, so the denominators are never zero.
-        let (u, v, au, x3, y3) = unsafe { Self::__dbl_witnesses(x, y, a) };
+        let (u, v, au, x3, y3) = unsafe { __dbl_witnesses(x, y, a) };
 
         // 1. u == x * x
         evaluate_quadratic_expression([[x]], [[false]], [[x]], [[false]], [u], [true]);
@@ -449,4 +414,45 @@ where
         }
         (table_x, table_y)
     }
+}
+
+/// Unconstrained witness computation for `add_internal`.
+///
+/// Returns `(x1x2, y1y2, e, t, x3, y3)` where `e = x1*x2*y1*y2`, `t = d*e` and
+/// `(x3, y3)` is the twisted Edwards sum. All outputs are constrained by the caller.
+unconstrained fn __add_witnesses<B>(x1: B, y1: B, x2: B, y2: B, a: B, d: B) -> (B, B, B, B, B, B)
+where
+    B: BigNum,
+{
+    let one = B::one();
+    let x1x2 = x1.__mul(x2);
+    let y1y2 = y1.__mul(y2);
+    let e = x1x2.__mul(y1y2); // x1*x2*y1*y2
+    let t = d.__mul(e); // d*x1*x2*y1*y2
+    let num_x = x1.__mul(y2).__add(y1.__mul(x2)); // x1*y2 + y1*x2
+    let num_y = y1y2.__sub(a.__mul(x1x2)); // y1*y2 - a*x1*x2
+    let x3 = num_x.__div(one.__add(t)); // / (1 + t)
+    let y3 = num_y.__div(one.__sub(t)); // / (1 - t)
+    (x1x2, y1y2, e, t, x3, y3)
+}
+
+/// Unconstrained witness computation for `dbl_internal`.
+///
+/// Returns `(u, v, au, x3, y3)` where `u = x^2`, `v = y^2`, `au = a*x^2` and
+/// `(x3, y3)` is the doubled point. All outputs are constrained by the caller.
+unconstrained fn __dbl_witnesses<B>(x: B, y: B, a: B) -> (B, B, B, B, B)
+where
+    B: BigNum,
+{
+    let u = x.__mul(x); // x^2
+    let v = y.__mul(y); // y^2
+    let au = a.__mul(u); // a*x^2
+    let xy = x.__mul(y);
+    let num_x = xy.__add(xy); // 2*x*y
+    let num_y = v.__sub(au); // y^2 - a*x^2
+    let one = B::one();
+    let two = one.__add(one);
+    let x3 = num_x.__div(au.__add(v)); // / (a*x^2 + y^2)      == 1 + t
+    let y3 = num_y.__div(two.__sub(au).__sub(v)); // / (2 - a*x^2 - y^2)  == 1 - t
+    (u, v, au, x3, y3)
 }
