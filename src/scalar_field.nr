@@ -92,7 +92,6 @@ impl<let N: u32> std::convert::From<Field> for ScalarField<N> {
             }
             assert(acc - skew as Field == x);
         } else {
-            // TODO: if num bits = 64, validate in sum of the bits is smaller than the Field modulus
             let mut lo: Field = 0;
             let mut hi: Field = 0;
 
@@ -104,6 +103,8 @@ impl<let N: u32> std::convert::From<Field> for ScalarField<N> {
             }
 
             lo -= skew as Field;
+            assert(hi * TWO_POW_128 + lo == x);
+
             // Validate that the integer represented by (lo, hi) is smaller than the integer represented by (plo, phi)
 
             // Safety: `borrow`'s value is constrained to be correct by below range constraints.
