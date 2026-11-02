@@ -109,8 +109,7 @@ fn test_full_range_scalar_needs_64_slices() {
     // 2^252 range that `ScalarField<63>` covers. `ScalarField<64>` is required.
     //
     // (ell - 1) * B == -B, which we use as the expected value without an external vector.
-    let ell_minus_1 =
-        7237005577332262213973186563042994240857116359379907606001950938285454250988;
+    let ell_minus_1 = 7237005577332262213973186563042994240857116359379907606001950938285454250988;
     let scalar_f: ScalarField<64> = ScalarField::from(ell_minus_1);
     let result = Ed25519::one().mul(scalar_f);
     assert_eq_point(result, Ed25519::one().neg());
