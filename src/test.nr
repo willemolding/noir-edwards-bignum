@@ -114,3 +114,45 @@ fn test_full_range_scalar_needs_64_slices() {
     let result = Ed25519::one().mul(scalar_f);
     assert_eq_point(result, Ed25519::one().neg());
 }
+
+#[test]
+fn test_scalar_field_64_boundaries() {
+    let values: [Field; 6] = [
+        0,
+        1,
+        0xffffffffffffffffffffffffffffffff,
+        0x100000000000000000000000000000000,
+        0x1000000000000000000000000000000000000000000000000000000000000000,
+        -1,
+    ];
+    for x in values {
+        let scalar_f: ScalarField<64> = ScalarField::from(x);
+        assert(ScalarField::<64>::into(scalar_f) == x);
+    }
+}
+
+#[test]
+fn test_scalar_mul_64_zero() {
+    let scalar_f: ScalarField<64> = ScalarField::from(0);
+    assert(Ed25519::one().mul(scalar_f).is_zero());
+}
+
+#[test]
+// Check the honest decomposition at group level: compare `mul` against a
+// bitwise double-and-add reference at the boundary scalars. Rejection of
+// aliased decompositions is covered by the `assert_wnaf_decomposition_binds`
+// tests in `scalar_field.nr`.
+fn test_full_scalar_mul_matches_bitwise() {
+    let point = Ed25519::one();
+    let values: [Field; 5] =
+        [0, 1, 0xffffffffffffffffffffffffffffffff, 0x100000000000000000000000000000000, -1];
+    for x in values {
+        let scalar: ScalarField<64> = ScalarField::from(x);
+        let mut expected = Ed25519::zero();
+        for bit in x.to_be_bits::<254>() {
+            expected = expected.dbl();
+            expected = if bit { expected + point } else { expected };
+        }
+        assert_eq_point(point.mul(scalar), expected);
+    }
+}
