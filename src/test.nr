@@ -156,3 +156,45 @@ fn test_full_scalar_mul_matches_bitwise() {
         assert_eq_point(point.mul(scalar), expected);
     }
 }
+
+#[test(should_fail_with = "Point is not on the curve")]
+fn test_new_rejects_point_not_on_curve() {
+    // The generator with y + 1.
+    let _ = Ed25519::new(
+        BigNum::from_limbs([
+            0x2cc7609525a7b2c9562d608f25d51a,
+            0x36d3cd6e53fec0a4e231fdd6dc5c69,
+            0x2169,
+        ]),
+        BigNum::from_limbs([
+            0x666666666666666666666666666659,
+            0x666666666666666666666666666666,
+            0x6666,
+        ]),
+    );
+}
+
+#[test(should_fail_with = "Point is not on the curve")]
+fn test_assert_is_on_curve_rejects_point_not_on_curve() {
+    point([0, 0, 0], [0, 0, 0]).assert_is_on_curve();
+}
+
+#[test]
+fn test_assert_equal() {
+    let b = Ed25519::one();
+    b.dbl().assert_equal(b + b);
+}
+
+#[test(should_fail_with = "Points are not equal")]
+fn test_assert_equal_rejects_different_x() {
+    // `b` and `-b` share the y coordinate and differ in x.
+    let b = Ed25519::one();
+    b.assert_equal(b.neg());
+}
+
+#[test(should_fail_with = "Points are not equal")]
+fn test_assert_equal_rejects_different_y() {
+    // `(0, -1)` and `(0, 1)` share the x coordinate and differ in y.
+    let minus_one = [0xffffffffffffffffffffffffffffec, 0xffffffffffffffffffffffffffffff, 0x7fff];
+    point([0, 0, 0], minus_one).assert_equal(Ed25519::zero());
+}

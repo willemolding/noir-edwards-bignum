@@ -163,13 +163,13 @@ where
         let t1 = self.y.sqr();
         let t2 = a * t0 + t1;
         let t3 = B::one() + d * t0 * t1;
-        assert(t2 == t3);
+        assert(t2 == t3, "Point is not on the curve");
     }
 
     /// Constrain two points to equal each other
     fn assert_equal(self, other: Self) {
-        assert(self.x == other.x);
-        assert(self.y == other.y);
+        assert(self.x == other.x, "Points are not equal");
+        assert(self.y == other.y, "Points are not equal");
     }
 
     /// Return a bool that describes whether the point is on the curve
