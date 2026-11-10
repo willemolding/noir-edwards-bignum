@@ -109,9 +109,92 @@ fn test_full_range_scalar_needs_64_slices() {
     // 2^252 range that `ScalarField<63>` covers. `ScalarField<64>` is required.
     //
     // (ell - 1) * B == -B, which we use as the expected value without an external vector.
-    let ell_minus_1 =
-        7237005577332262213973186563042994240857116359379907606001950938285454250988;
+    let ell_minus_1 = 7237005577332262213973186563042994240857116359379907606001950938285454250988;
     let scalar_f: ScalarField<64> = ScalarField::from(ell_minus_1);
     let result = Ed25519::one().mul(scalar_f);
     assert_eq_point(result, Ed25519::one().neg());
+}
+
+#[test]
+fn test_scalar_field_64_boundaries() {
+    let values: [Field; 6] = [
+        0,
+        1,
+        0xffffffffffffffffffffffffffffffff,
+        0x100000000000000000000000000000000,
+        0x1000000000000000000000000000000000000000000000000000000000000000,
+        -1,
+    ];
+    for x in values {
+        let scalar_f: ScalarField<64> = ScalarField::from(x);
+        assert(ScalarField::<64>::into(scalar_f) == x);
+    }
+}
+
+#[test]
+fn test_scalar_mul_64_zero() {
+    let scalar_f: ScalarField<64> = ScalarField::from(0);
+    assert(Ed25519::one().mul(scalar_f).is_zero());
+}
+
+#[test]
+// Check the honest decomposition at group level: compare `mul` against a
+// bitwise double-and-add reference at the boundary scalars. Rejection of
+// aliased decompositions is covered by the `assert_wnaf_decomposition_binds`
+// tests in `scalar_field.nr`.
+fn test_full_scalar_mul_matches_bitwise() {
+    let point = Ed25519::one();
+    let values: [Field; 5] =
+        [0, 1, 0xffffffffffffffffffffffffffffffff, 0x100000000000000000000000000000000, -1];
+    for x in values {
+        let scalar: ScalarField<64> = ScalarField::from(x);
+        let mut expected = Ed25519::zero();
+        for bit in x.to_be_bits::<254>() {
+            expected = expected.dbl();
+            expected = if bit { expected + point } else { expected };
+        }
+        assert_eq_point(point.mul(scalar), expected);
+    }
+}
+
+#[test(should_fail_with = "Point is not on the curve")]
+fn test_new_rejects_point_not_on_curve() {
+    // The generator with y + 1.
+    let _ = Ed25519::new(
+        BigNum::from_limbs([
+            0x2cc7609525a7b2c9562d608f25d51a,
+            0x36d3cd6e53fec0a4e231fdd6dc5c69,
+            0x2169,
+        ]),
+        BigNum::from_limbs([
+            0x666666666666666666666666666659,
+            0x666666666666666666666666666666,
+            0x6666,
+        ]),
+    );
+}
+
+#[test(should_fail_with = "Point is not on the curve")]
+fn test_assert_is_on_curve_rejects_point_not_on_curve() {
+    point([0, 0, 0], [0, 0, 0]).assert_is_on_curve();
+}
+
+#[test]
+fn test_assert_equal() {
+    let b = Ed25519::one();
+    b.dbl().assert_equal(b + b);
+}
+
+#[test(should_fail_with = "Points are not equal")]
+fn test_assert_equal_rejects_different_x() {
+    // `b` and `-b` share the y coordinate and differ in x.
+    let b = Ed25519::one();
+    b.assert_equal(b.neg());
+}
+
+#[test(should_fail_with = "Points are not equal")]
+fn test_assert_equal_rejects_different_y() {
+    // `(0, -1)` and `(0, 1)` share the x coordinate and differ in y.
+    let minus_one = [0xffffffffffffffffffffffffffffec, 0xffffffffffffffffffffffffffffff, 0x7fff];
+    point([0, 0, 0], minus_one).assert_equal(Ed25519::zero());
 }

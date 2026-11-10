@@ -163,13 +163,13 @@ where
         let t1 = self.y.sqr();
         let t2 = a * t0 + t1;
         let t3 = B::one() + d * t0 * t1;
-        assert(t2 == t3);
+        assert(t2 == t3, "Point is not on the curve");
     }
 
     /// Constrain two points to equal each other
     fn assert_equal(self, other: Self) {
-        assert(self.x == other.x);
-        assert(self.y == other.y);
+        assert(self.x == other.x, "Points are not equal");
+        assert(self.y == other.y, "Points are not equal");
     }
 
     /// Return a bool that describes whether the point is on the curve
@@ -241,8 +241,7 @@ where
         let d = Params::d();
 
         // Generalized version of `mul` for multiple points.
-        let mut point_tables: [([B; 16], [B; 16]); N] =
-            [([B::zero(); 16], [B::zero(); 16]); N];
+        let mut point_tables: [([B; 16], [B; 16]); N] = [([B::zero(); 16], [B::zero(); 16]); N];
         for j in 0..N {
             point_tables[j] = points[j].compute_straus_point_table(a, d);
         }
@@ -309,8 +308,7 @@ where
         //
         // Safety: all six returned witnesses are constrained by the
         // `evaluate_quadratic_expression` calls that follow.
-        let (x1x2, y1y2, e, t, x3, y3) =
-            unsafe { __add_witnesses(x1, y1, x2, y2, a, d) };
+        let (x1x2, y1y2, e, t, x3, y3) = unsafe { __add_witnesses(x1, y1, x2, y2, a, d) };
 
         // 1. x1x2 == x1 * x2
         evaluate_quadratic_expression([[x1]], [[false]], [[x2]], [[false]], [x1x2], [true]);
