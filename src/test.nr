@@ -109,9 +109,51 @@ fn test_full_range_scalar_needs_64_slices() {
     // 2^252 range that `ScalarField<63>` covers. `ScalarField<64>` is required.
     //
     // (ell - 1) * B == -B, which we use as the expected value without an external vector.
-    let ell_minus_1 =
-        7237005577332262213973186563042994240857116359379907606001950938285454250988;
+    let ell_minus_1 = 7237005577332262213973186563042994240857116359379907606001950938285454250988;
     let scalar_f: ScalarField<64> = ScalarField::from(ell_minus_1);
     let result = Ed25519::one().mul(scalar_f);
     assert_eq_point(result, Ed25519::one().neg());
+}
+
+#[test]
+fn test_scalar_field_64_boundaries() {
+    let values: [Field; 6] = [
+        0,
+        1,
+        0xffffffffffffffffffffffffffffffff,
+        0x100000000000000000000000000000000,
+        0x1000000000000000000000000000000000000000000000000000000000000000,
+        -1,
+    ];
+    for x in values {
+        let scalar_f: ScalarField<64> = ScalarField::from(x);
+        assert(ScalarField::<64>::into(scalar_f) == x);
+    }
+}
+
+#[test]
+fn test_scalar_mul_64_zero() {
+    let scalar_f: ScalarField<64> = ScalarField::from(0);
+    assert(Ed25519::one().mul(scalar_f).is_zero());
+}
+
+#[test]
+// Check the honest decomposition at group level at two boundary scalars: 2^128,
+// where the high 128-bit limb starts, and p - 1, the largest input. The expected
+// points were computed outside the circuit. Rejection of aliased decompositions
+// is covered by the `assert_wnaf_decomposition_binds` tests in `scalar_field.nr`.
+fn test_scalar_mul_64_boundary_vectors() {
+    let scalar_f: ScalarField<64> = ScalarField::from(0x100000000000000000000000000000000);
+    let expected = point(
+        [0xe685c9c2e723e5fc8047ae60b7e824, 0xafff3c45f32c952d3984e14e29a098, 0x4c27],
+        [0xd0be1e51a4c49e5bbabd114bf5a66b, 0x99e6526dc87d95f11eb626c29c3a90, 0x5f2c],
+    );
+    assert_eq_point(Ed25519::one().mul(scalar_f), expected);
+
+    let scalar_f: ScalarField<64> = ScalarField::from(-1);
+    let expected = point(
+        [0x9efb6747422285d2a0e287b3705dba, 0xf7e2aa77f5953cac88a285565e5e93, 0x76cf],
+        [0x572cf5559328f802466d559bc4f7b4, 0xc8ea3a9aefc90f32c3f9ea7882d298, 0x63ba],
+    );
+    assert_eq_point(Ed25519::one().mul(scalar_f), expected);
 }

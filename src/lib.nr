@@ -241,8 +241,7 @@ where
         let d = Params::d();
 
         // Generalized version of `mul` for multiple points.
-        let mut point_tables: [([B; 16], [B; 16]); N] =
-            [([B::zero(); 16], [B::zero(); 16]); N];
+        let mut point_tables: [([B; 16], [B; 16]); N] = [([B::zero(); 16], [B::zero(); 16]); N];
         for j in 0..N {
             point_tables[j] = points[j].compute_straus_point_table(a, d);
         }
@@ -309,8 +308,7 @@ where
         //
         // Safety: all six returned witnesses are constrained by the
         // `evaluate_quadratic_expression` calls that follow.
-        let (x1x2, y1y2, e, t, x3, y3) =
-            unsafe { __add_witnesses(x1, y1, x2, y2, a, d) };
+        let (x1x2, y1y2, e, t, x3, y3) = unsafe { __add_witnesses(x1, y1, x2, y2, a, d) };
 
         // 1. x1x2 == x1 * x2
         evaluate_quadratic_expression([[x1]], [[false]], [[x2]], [[false]], [x1x2], [true]);
